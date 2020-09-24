@@ -1,61 +1,64 @@
-import requests
-
-from bs4 import BeautifulSoup
-from aiogram.dispatcher.filters import Command
-from choice_buttons import choice
+from aiogram.dispatcher.filters import Command, Text
+from handlers import get_quontation, get_index, get_trade_results, get_company_trade_results
 from aiogram.types import Message, CallbackQuery
+from choice_buttons import user_menu, trade_button
 from aiogram import Bot, Dispatcher, executor
-
 from config import BOT_TOKEN
+from telegram_bot_pagination import InlineKeyboardPaginator
+
 bot = Bot(BOT_TOKEN, parse_mode="HTML")
 dp = Dispatcher(bot)
 
 
 @dp.message_handler(Command("start"))
-async def process_start_command(message: Message):
-    await message.reply("Здравстуйте!\n Чтобы вызвать помощь,напишите /help")
+async def show_menu(message: Message):
+    await message.answer(text="Выберите из списка необходимую опцию \n", reply_markup=user_menu)
 
 
-@dp.message_handler(Command("help"))
-async def process_help_command(message: Message):
-    await message.reply("Напишите мне /getinfo,чтобы вызвать информационную панель")
+@dp.message_handler(Text(equals=["Котировки \U0001F4CA", "Итоги последних сделок \U0001F4DD",
+                    "Индекс и капитализация"]))
+async def show_menu(message: Message):
+
+    if message.text == 'Котировки \U0001F4CA':
+        await send_character_page(message)
+    elif message.text == 'Индекс и капитализация':
+        await message.answer(get_index())
+    elif message.text == 'Итоги последних сделок \U0001F4DD':
+        await message.answer(get_trade_results(), reply_markup=trade_button)
+
+    else:
+        await message.answer("Опция находится в разработке")
 
 
-@dp.message_handler(Command("getinfo"))
-async def process_start_getinfo(message: Message):
-    await message.answer(text="Выберите из списка необходимую опцию \n",
-                         reply_markup=choice)
+@dp.callback_query_handler(text_contains="company")
+async def get_company_trade_info(callback_query: CallbackQuery):
+    await callback_query.answer(cache_time=20)
+    await callback_query.message.answer(get_company_trade_results())
 
 
-@dp.callback_query_handler(text_contains="btn1")
-async def process_callback(call: CallbackQuery):
-    await call.answer(cache_time=60)
+@dp.callback_query_handler(text_contains="character")
+async def process_callback_button1(callback_query: CallbackQuery):
+    page = int(callback_query.data.split('#')[1])
+    await bot.delete_message(
+        callback_query.message.chat.id,
+        callback_query.message.message_id
+    )
+    await send_character_page(callback_query.message, page)
 
-    url = 'https://www.kse.kg/ru/Quotes'
-    r = requests.get(url)
-    soup = BeautifulSoup(r.content, 'html.parser')
-    line = soup.find('table', class_='class1').find_all('tr', class_='parse')
 
-    data = []
+async def send_character_page(message, page=1):
+    paginator = InlineKeyboardPaginator(
+        len(get_quontation()),
+        current_page=page,
+        data_pattern='character#{page}'
+    )
 
-    for tr in line:
-        td = tr.find_all('td')
-        name = td[2].text
-        sell = td[4].text
-        buy = td[6].text
+    await bot.send_message(
+        message.chat.id,
+        get_quontation()[page-1],
+        reply_markup=paginator.markup,
+        parse_mode='Markdown'
+    )
 
-        if not sell:
-            data = {
-                '<b>\U0001F9F0 Наименование</b>': name,
-                '<b>\u2757\uFE0F Покупка</b>': buy
-            }
-
-        if not buy:
-            data = {
-                '<b>\U0001F9F0 Наименование</b>': name,
-                '<b>\u203C Продажа</b>': sell
-            }
-
-        await call.message.answer(str(data))
 if __name__ == '__main__':
     executor.start_polling(dp)
